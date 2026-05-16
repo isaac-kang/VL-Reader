@@ -856,7 +856,11 @@ class Trainer(object):
                 if train_table is not None:
                     wandb_log['train_samples'] = train_table
 
-                # VL-Reader phase 1: image + text reconstruction tables
+                # VL-Reader phase 1: image + text reconstruction tables.
+                # Log under a unique per-epoch key so wandb's workspace
+                # shows one panel per epoch (under the `val/recon_samples/`
+                # group) instead of overwriting the same key — which would
+                # only keep the latest epoch's 8 samples in `run.summary`.
                 if phase1_viz:
                     img_table = wandb.Table(columns=[
                         'orig', 'masked', 'reconstructed', 'gt_text',
@@ -871,7 +875,7 @@ class Trainer(object):
                             s['masked_text'],
                             s['recon_text'],
                         )
-                    wandb_log['val/recon_samples'] = img_table
+                    wandb_log[f'val/recon_samples/ep_{epoch:02d}'] = img_table
             wandb_log['global_step'] = global_step
             self.wandb_run.log(wandb_log)
 
