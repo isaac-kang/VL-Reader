@@ -55,9 +55,11 @@ tea_debug.log
 *.bak
 
 # --- Data (should live outside repo via symlinks/paths in configs) ---
-data/
-.data/
-lmdb/
+# Anchored with leading `/` so they only match at repo root and don't
+# accidentally swallow tools/data/ (the dataset-loader code).
+/data/
+/.data/
+/lmdb/
 
 # --- LMDB caches (written into data dirs by RatioDataSetTVResize) ---
 .wh_ratio_cache_*.npz
