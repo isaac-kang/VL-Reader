@@ -856,26 +856,31 @@ class Trainer(object):
                 if train_table is not None:
                     wandb_log['train_samples'] = train_table
 
-                # VL-Reader phase 1: image + text reconstruction tables.
-                # Log under a unique per-epoch key so wandb's workspace
-                # shows one panel per epoch (under the `val/recon_samples/`
-                # group) instead of overwriting the same key — which would
-                # only keep the latest epoch's 8 samples in `run.summary`.
+                # VL-Reader phase 1: single growing recon-samples table.
+                # Each epoch contributes 8 rows; the leading `epoch` column
+                # makes row groups align with pagination boundaries (wandb
+                # default row count per page is 8 at medium / 4 at large
+                # / 2 at extra large — i.e., one click = one epoch group).
                 if phase1_viz:
+                    if not hasattr(self, '_phase1_master_viz'):
+                        self._phase1_master_viz = []
+                    self._phase1_master_viz.append((epoch, phase1_viz))
                     img_table = wandb.Table(columns=[
-                        'orig', 'masked', 'reconstructed', 'gt_text',
-                        'masked_text', 'recon_text'
+                        'epoch', 'orig', 'masked', 'reconstructed',
+                        'gt_text', 'masked_text', 'recon_text'
                     ])
-                    for s in phase1_viz:
-                        img_table.add_data(
-                            wandb.Image(s['image_orig']),
-                            wandb.Image(s['image_masked']),
-                            wandb.Image(s['image_recon']),
-                            s['gt_text'],
-                            s['masked_text'],
-                            s['recon_text'],
-                        )
-                    wandb_log[f'val/recon_samples/ep_{epoch:02d}'] = img_table
+                    for ep, viz in self._phase1_master_viz:
+                        for s in viz:
+                            img_table.add_data(
+                                ep,
+                                wandb.Image(s['image_orig']),
+                                wandb.Image(s['image_masked']),
+                                wandb.Image(s['image_recon']),
+                                s['gt_text'],
+                                s['masked_text'],
+                                s['recon_text'],
+                            )
+                    wandb_log['val/recon_samples'] = img_table
             wandb_log['global_step'] = global_step
             self.wandb_run.log(wandb_log)
 
