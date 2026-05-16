@@ -1094,7 +1094,16 @@ class Trainer(object):
         _arch = self.cfg.get('Architecture', {})
         _is_phase1 = (_arch.get('algorithm') == 'VLReader' and _arch.get(
             'Decoder', {}).get('phase', 'pretrain') == 'pretrain')
+        # Save the current RNG state so resetting the seed inside eval does
+        # not bleed into the training RNG stream (text/image masking +
+        # dropout would otherwise stop being IID across epochs). Restored in
+        # the finally-block after the eval loop completes.
+        _saved_cpu_rng = None
+        _saved_cuda_rng = None
         if _is_phase1:
+            _saved_cpu_rng = torch.random.get_rng_state()
+            if torch.cuda.is_available():
+                _saved_cuda_rng = torch.cuda.random.get_rng_state_all()
             torch.manual_seed(0)
             if torch.cuda.is_available():
                 torch.cuda.manual_seed_all(0)
@@ -1126,8 +1135,15 @@ class Trainer(object):
                                     + batch_tensor[file_idx_pos + 1:])
                 start = time.time()
                 if self.scaler:
-                    with torch.cuda.amp.autocast(
-                            enabled=self.device.type == 'cuda'):
+                    # Match train-time dtype policy (bf16 when supported,
+                    # else fp16). The legacy torch.cuda.amp.autocast() here
+                    # defaulted to fp16 even on bf16-capable HW, which can
+                    # blow up sensitive losses (e.g., visual MSE → NaN).
+                    amp_dtype = (torch.bfloat16
+                                 if torch.cuda.is_bf16_supported()
+                                 else torch.float16)
+                    with torch.amp.autocast(device_type=self.device.type,
+                                            dtype=amp_dtype):
                         preds = eval_model(batch_tensor[0],
                                            data=batch_tensor[1:])
                 else:
@@ -1254,6 +1270,14 @@ class Trainer(object):
                 f'Saved {len(prediction_rows)} predictions to {predictions_save_path}')
         pbar.close()
         eval_model.train()
+        # Restore training-side RNG that was temporarily reseeded for
+        # deterministic phase-1 eval masking. Done in plain-flow (not a real
+        # try/finally) because the eval body above doesn't raise; if you add
+        # raising code later, wrap the body in try/finally instead.
+        if _saved_cpu_rng is not None:
+            torch.random.set_rng_state(_saved_cpu_rng)
+        if _saved_cuda_rng is not None:
+            torch.cuda.random.set_rng_state_all(_saved_cuda_rng)
         metric['fps'] = total_frame / total_time if total_time > 0 else 0.0
         metric['_wandb_samples'] = wandb_samples
         # Phase 1 viz samples carried back to eval_step for end-of-epoch

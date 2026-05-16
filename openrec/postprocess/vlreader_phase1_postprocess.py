@@ -52,13 +52,9 @@ class VLReaderPhase1PostProcess(BaseRecLabelDecode):
                 mask=text_mask_input,
                 shift=True,
             )
-            # recon_text shows OUTPUT view: target_text with model's prediction
-            # overlaid at the queries that were supervised. In phase 1 (B),
-            # supervision is at output position k iff text_mask[k]=True (i.e.,
-            # input position k was masked). The model's prediction at q_k
-            # targets c_{k+1}. So overlay positions in recon_text are visually
-            # offset by 1 from the `_` positions in masked_text — that's the
-            # AR-shift artifact, not a bug.
+            # recon_text shows the same INPUT-aligned view as masked_text:
+            # wherever tgt_in had a masked character, overlay the model's
+            # prediction for that same position.
             out['recon_text'] = self._ids_to_str(
                 target_text,
                 overlay=recon_ids,

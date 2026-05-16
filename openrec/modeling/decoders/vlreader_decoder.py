@@ -280,23 +280,20 @@ class MVLDecoder(nn.Module):
         v_mask = encoder_out['mask']  # (B, N) — True at masked patches
         target_patches = encoder_out['target_patches']  # (B, N, patch_dim)
 
-        # Phase 1 = PARSeq-style causal AR with selective loss:
-        #   - text input fl has L+1 tokens [BOS, c_1..c_L]; some replaced by
-        #     [MASK_l]
+        # Phase 1 = masked text-token reconstruction with selective loss:
+        #   - text input fl has L+1 tokens [BOS, c_1..c_L]; some characters are
+        #     replaced by [MASK_l]
         #   - causal forward attention mask (q_k attends to keys 0..k)
         #   - kpm blocks attention to [MASK_l] positions and PADs (prevents
         #     leakage of the mask-token embedding into other queries)
-        #   - supervision (selective CE) only at output positions k where
-        #     INPUT position k was masked, target = tgt_out[k] = c_{k+1}.
-        #     Following Fig. 4 of the paper: when c_p is masked at input
-        #     col p, q_p (which targets c_{p+1}) is the query whose context
-        #     is degraded — the loss trains the model to predict the next
-        #     character despite that hole.
+        #   - supervision (selective CE) only at input positions that were
+        #     masked, target = tgt_in[k]. This matches MVLR's masked language
+        #     token reconstruction objective; tgt_out is only used by phase 2
+        #     AR/PLM recognition.
         tgt = data[0].long()  # (B, L+2) = [BOS, c1..cL, EOS, PAD..]
         bs = tgt.shape[0]
         device = tgt.device
         tgt_in = tgt[:, :-1]  # (B, L+1)
-        tgt_out = tgt[:, 1:]  # (B, L+1)
 
         maskable = (tgt_in != self.bos_id) & (tgt_in != self.eos_id) & (
             tgt_in != self.pad_id)
@@ -328,13 +325,13 @@ class MVLDecoder(nn.Module):
             v_loss = v_loss / max(1, len(v_logits))
 
         # Linguistic reconstruction loss: averaged across layers, selective CE
-        # at output positions where the corresponding INPUT position was masked.
+        # at input positions where that same input token was masked.
         l_loss = fq.new_zeros(())
         ml = text_mask  # (B, L+1) — input-position mask, used as-is
         n_masked = ml.sum().item()
         if n_masked > 0:
             n_classes = self.head_l.out_features
-            tgt_flat = tgt_out.reshape(-1)
+            tgt_flat = tgt_in.reshape(-1)
             ml_flat = ml.reshape(-1)
             for q_pred in l_logits:
                 logits_flat = q_pred.reshape(-1, n_classes)
@@ -345,7 +342,14 @@ class MVLDecoder(nn.Module):
             l_loss = l_loss / max(1, len(l_logits))
 
         loss = self.lambda_v * v_loss + self.lambda_l * l_loss
-        return [loss, l_logits[-1]]
+        return [
+            loss,
+            l_logits[-1],
+            {
+                'loss_visual': v_loss,
+                'loss_linguistic': l_loss,
+            },
+        ]
 
     # -- eval: phase 1 (MVLR reconstruction metrics + viz dump) ----------------
 
@@ -381,7 +385,6 @@ class MVLDecoder(nn.Module):
         bs = tgt.shape[0]
         device = tgt.device
         tgt_in = tgt[:, :-1]
-        tgt_out = tgt[:, 1:]
         L_q = tgt_in.shape[1]
 
         maskable = (tgt_in != self.bos_id) & (tgt_in != self.eos_id) & (
@@ -410,7 +413,7 @@ class MVLDecoder(nn.Module):
             'target_var': encoder_out.get('target_var'),
             'linguistic_pred': l_logits[-1],     # (B, L+1, n_classes)
             'text_mask': text_mask,               # (B, L+1) bool
-            'target_text': tgt_out,               # (B, L+1) long
+            'target_text': tgt_in,                # (B, L+1) long
             'tgt_in': tgt_in,                     # (B, L+1) long
         }
 

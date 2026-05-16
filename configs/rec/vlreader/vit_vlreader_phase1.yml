@@ -32,10 +32,13 @@ Global:
   accumulation_steps: 1
 
 Optimizer:
-  name: AdamW
+  # Paper §4.1 specifies plain Adam (not AdamW). Stick with Adam to stay
+  # faithful even though ViT models conventionally use AdamW. No weight
+  # decay because the paper doesn't mention one and torch.optim.Adam's
+  # `weight_decay` is L2-in-gradient (not decoupled) which is a different
+  # regularizer entirely.
+  name: Adam
   lr: 0.0007  # paper: 7e-4 with 4 GPUs * 192 = 768 effective bs
-  weight_decay: 0.05
-  filter_bias_and_bn: True
 
 LRScheduler:
   name: OneCycleLR
@@ -55,7 +58,10 @@ Architecture:
     num_heads: 12
     mlp_ratio: 4
     mask_ratio: 0.75       # r_v
-    norm_pix_loss: True
+    # Paper Eq. 10 is just MSE on masked pixels — per-patch normalization
+    # is a MAE-original convention not mentioned. Disable to stay closer to
+    # paper text; treat as an ablation knob.
+    norm_pix_loss: False
   Decoder:
     name: MVLDecoder
     max_label_length: *max_text_length

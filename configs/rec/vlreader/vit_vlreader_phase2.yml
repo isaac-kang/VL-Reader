@@ -11,14 +11,20 @@ Global:
   save_epoch_step: [99999, 1]
   eval_epoch_step: [0, 1]
   eval_batch_step: [0, 500]
-  cal_metric_during_train: True
+  # decoder returns [loss, logits] list during training so the in-loop
+  # train-metric path (which expects raw tensor logits) skips it anyway.
+  # Disable to keep wandb panels honest.
+  cal_metric_during_train: False
   # weights/pretrain/  : 내가 phase 1로 직접 학습한 ckpt (self-trained)
   # weights/pretrained/: GitHub 등에서 받은 외부 pretrained ckpt
   pretrained_model: ./weights/pretrain/vlreader/best.pth
   checkpoints:
   use_wandb: true
   total_bs: 768
-  accumulation_steps: 4
+  # trainer treats total_bs as the PER-STEP batch (per-card BS = total_bs/world_size).
+  # accumulation_steps multiplies on top → keep at 1 so effective batch = 768
+  # matches paper (4 GPUs × 192 per-card). Setting >1 would inflate beyond paper.
+  accumulation_steps: 1
 
 Optimizer:
   lr: 0.0001  # paper: 1e-4 in phase 2
