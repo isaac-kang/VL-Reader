@@ -1,0 +1,51 @@
+_BASE_:
+  - ./vit_vlreader_phase1.yml
+
+# VL-Reader phase 2 (recognition fine-tuning with PARSeq-style PLM).
+# Inherits dataset/sampler from vit_vlreader_phase1.yml; overrides training
+# objective (visual reconstruction off, text masking off), the schedule,
+# and switches PostProcess/Metric back to standard AR recognition.
+
+Global:
+  epoch_num: 10
+  save_epoch_step: [99999, 1]
+  eval_epoch_step: [0, 1]
+  eval_batch_step: [0, 500]
+  cal_metric_during_train: True
+  # weights/pretrain/  : 내가 phase 1로 직접 학습한 ckpt (self-trained)
+  # weights/pretrained/: GitHub 등에서 받은 외부 pretrained ckpt
+  pretrained_model: ./weights/pretrain/vlreader/best.pth
+  checkpoints:
+  use_wandb: true
+  total_bs: 768
+  accumulation_steps: 4
+
+Optimizer:
+  lr: 0.0001  # paper: 1e-4 in phase 2
+
+LRScheduler:
+  warmup_epoch: 1
+
+Architecture:
+  Encoder:
+    mask_ratio: 0.0          # disable visual masking
+  Decoder:
+    text_mask_ratio: 0.0     # disable text masking
+    lambda_v: 0.0            # disable visual reconstruction loss
+    lambda_l: 1.0
+    phase: finetune
+    perm_num: 6
+    perm_forward: True
+    perm_mirrored: True
+    decode_ar: True
+    refine_iters: 1
+
+# Phase 2 is real AR recognition — restore the standard PostProcess/Metric
+# instead of inheriting phase 1's reconstruction-mode versions.
+PostProcess:
+  name: ARLabelDecode
+
+Metric:
+  name: RecMetric
+  main_indicator: acc
+  is_filter: True

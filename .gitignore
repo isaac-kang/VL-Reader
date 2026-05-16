@@ -1,0 +1,67 @@
+# --- Training artifacts (large) ---
+output/
+wandb/
+weights/
+runs/
+**/*.pth
+**/*.pdparams
+**/*.ckpt
+**/*.safetensors
+**/*.bin
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Jupyter / IPython ---
+.ipynb_checkpoints/
+*.ipynb
+
+# --- Virtual envs ---
+venv/
+env/
+.venv/
+.env/
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# --- Claude / agent state ---
+.agents/
+.codex/
+.claude/
+.wandb_run_id
+.wandb_run_id.txt
+
+# --- Logs / temp ---
+*.log
+tea_debug.log
+*.tmp
+*.bak
+
+# --- Data (should live outside repo via symlinks/paths in configs) ---
+data/
+.data/
+lmdb/
+
+# --- LMDB caches (written into data dirs by RatioDataSetTVResize) ---
+.wh_ratio_cache_*.npz
+
+# --- OS ---
+Thumbs.db
+.directory

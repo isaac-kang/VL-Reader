@@ -1,0 +1,154 @@
+# VL-Reader phase 1 (MVLR pre-training).
+#
+# model_key: short identifier used by run_*.sh to compose Global.output_dir as
+#   ./output/rec/<DATA_KEY>/<model_key>/  (DATA_KEY derived from --data alias)
+# Inherited by variant configs (e.g. vit_vlreader_base_finetune.yml) via _BASE_.
+model_key: vlreader
+
+Global:
+  device: gpu
+  epoch_num: 20
+  log_smooth_window: 20
+  print_batch_step: 10
+  # output_dir: auto-composed from --data + model_key by run_*.sh
+  eval_epoch_step: [0, 1]    # epoch마다 1회 (visualization 업로드 트리거)
+  eval_batch_step: [0, 5000] # batch eval은 드물게 — phase 1 metric은 무겁지 않지만 viz 업로드는 epoch 단위만
+  cal_metric_during_train: False  # phase 1 train preds는 dict이라 RecMetric 불호환; phase1 metric은 val에서만
+  pretrained_model:
+  checkpoints:
+  use_tensorboard: false
+  use_wandb: true
+  wandb_project: STR-reproduce
+  infer_img:
+  character_dict_path: &character_dict_path ./tools/utils/EN_symbol_dict.txt
+  max_text_length: &max_text_length 25
+  use_space_char: &use_space_char False
+  use_amp: True
+  # total_bs 설정 시 world_size로 나눠 per-card bs 자동 산출.
+  # 비워두면 아래 first_bs 값 그대로 per-card bs로 사용.
+  total_bs: 768
+  # 1 GPU(A6000 48GB)에 per-card BS=768이 fit하므로 accumulation 불필요.
+  # → effective batch = 768 (paper 매치).
+  accumulation_steps: 1
+
+Optimizer:
+  name: AdamW
+  lr: 0.0007  # paper: 7e-4 with 4 GPUs * 192 = 768 effective bs
+  weight_decay: 0.05
+  filter_bias_and_bn: True
+
+LRScheduler:
+  name: OneCycleLR
+  warmup_epoch: 1.5
+  cycle_momentum: False
+
+Architecture:
+  model_type: rec
+  algorithm: VLReader
+  Transform:
+  Encoder:
+    name: ViTVLReader
+    img_size: [32, 128]
+    patch_size: [4, 8]
+    embed_dim: 768
+    depth: 12
+    num_heads: 12
+    mlp_ratio: 4
+    mask_ratio: 0.75       # r_v
+    norm_pix_loss: True
+  Decoder:
+    name: MVLDecoder
+    max_label_length: *max_text_length
+    embed_dim: 768
+    dec_num_heads: 12
+    dec_mlp_ratio: 4
+    dec_depth: 4
+    patch_size: [4, 8]
+    in_image_channels: 3
+    text_mask_ratio: 0.2   # r_l
+    lambda_v: 1.0
+    lambda_l: 1.0
+    phase: pretrain
+    decode_ar: True
+    refine_iters: 1
+
+Loss:
+  name: VLReaderLoss
+
+PostProcess:
+  # Phase 1: pass-through dict + decode text strings for visualization.
+  name: VLReaderPhase1PostProcess
+  character_dict_path: *character_dict_path
+  use_space_char: *use_space_char
+
+Metric:
+  # Phase 1: linguistic_acc (top-1 on masked tokens) + visual_mse on masked patches.
+  name: VLReaderPhase1Metric
+  main_indicator: linguistic_acc
+
+Train:
+  dataset:
+    # ViT-Base는 fixed (32, 128) 입력만 받으므로 RatioSampler가 아니라
+    # LMDBDataSet + RecTVResize로 모든 이미지를 동일 shape으로 통일.
+    # OpenOCR vit_parseq.yml과 원본 parseq 레포가 채택한 방식.
+    name: LMDBDataSet
+    # 각 entry는 재귀 walk되어 leaf LMDB가 모두 자동 picked up.
+    # 9개 top-level 데이터셋 (train/val/test 전부 학습에 사용).
+    data_dir_list: [
+      '~/data/STR/parseq/english/lmdb/train/real/ArT',
+      '~/data/STR/parseq/english/lmdb/train/real/COCOv2.0',
+      '~/data/STR/parseq/english/lmdb/train/real/LSVT',
+      '~/data/STR/parseq/english/lmdb/train/real/MLT19',
+      '~/data/STR/parseq/english/lmdb/train/real/OpenVINO',
+      '~/data/STR/parseq/english/lmdb/train/real/RCTW17',
+      '~/data/STR/parseq/english/lmdb/train/real/ReCTS',
+      '~/data/STR/parseq/english/lmdb/train/real/TextOCR',
+      '~/data/STR/parseq/english/lmdb/train/real/Uber',
+    ]
+    transforms:
+      - DecodeImagePIL:
+          img_mode: RGB
+      - PARSeqAugPIL:
+      - ARLabelEncode:
+          character_dict_path: *character_dict_path
+          use_space_char: *use_space_char
+          max_text_length: *max_text_length
+      - RecTVResize:
+          image_shape: [32, 128]
+          padding: False
+      - KeepKeys:
+          keep_keys: ['image', 'label', 'length']
+  loader:
+    shuffle: True
+    batch_size_per_card: 192
+    drop_last: True
+    num_workers: 4
+
+Eval:
+  dataset:
+    name: LMDBDataSet
+    data_dir_list: [
+      '~/data/STR/openocr/evaluation/CUTE80',
+      '~/data/STR/openocr/evaluation/IC13_857',
+      '~/data/STR/openocr/evaluation/IC15_1811',
+      '~/data/STR/openocr/evaluation/IIIT5k',
+      '~/data/STR/openocr/evaluation/SVT',
+      '~/data/STR/openocr/evaluation/SVTP',
+    ]
+    transforms:
+      - DecodeImagePIL:
+          img_mode: RGB
+      - ARLabelEncode:
+          character_dict_path: *character_dict_path
+          use_space_char: *use_space_char
+          max_text_length: *max_text_length
+      - RecTVResize:
+          image_shape: [32, 128]
+          padding: False
+      - KeepKeys:
+          keep_keys: ['image', 'label', 'length']
+  loader:
+    shuffle: False
+    drop_last: False
+    batch_size_per_card: 192
+    num_workers: 4
