@@ -658,6 +658,7 @@ class Trainer(object):
                 if self.wandb_run is not None:
                     _payload = {f'train/{k}': v for k, v in train_stats.get().items()}
                     _payload['global_step'] = global_step
+                    _payload['epoch'] = epoch
                     self.wandb_run.log(_payload)
 
                 if is_main_process() and (

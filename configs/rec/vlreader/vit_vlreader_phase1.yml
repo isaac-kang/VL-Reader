@@ -12,7 +12,8 @@ Global:
   print_batch_step: 10
   # output_dir: auto-composed from --data + model_key by run_*.sh
   eval_epoch_step: [0, 1]    # epoch마다 1회 (visualization 업로드 트리거)
-  eval_batch_step: [0, 5000] # batch eval은 드물게 — phase 1 metric은 무겁지 않지만 viz 업로드는 epoch 단위만
+  eval_batch_step: [0, 500]  # 자주 — epoch 정수가 wandb에 빽빽이 찍혀 stair-step curve가 되도록. viz table은 eval_step의 log_samples=epoch boundary에서만 만들어지므로 부담 없음
+  save_epoch_step: [99999, 1]  # epoch_N.pth 저장 비활성 (latest.pth/best.pth만 유지)
   cal_metric_during_train: False  # phase 1 train preds는 dict이라 RecMetric 불호환; phase1 metric은 val에서만
   pretrained_model:
   checkpoints:
