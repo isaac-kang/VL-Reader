@@ -415,6 +415,16 @@ class Trainer(object):
             device = torch.device('cpu')
         self.device = device
 
+    def _compute_grad_norm(self):
+        grad_norms = []
+        for p in self.model.parameters():
+            if p.grad is None:
+                continue
+            grad_norms.append(torch.linalg.vector_norm(p.grad.detach().float(), 2))
+        if not grad_norms:
+            return None
+        return torch.linalg.vector_norm(torch.stack(grad_norms), 2)
+
     def train(self):
         cal_metric_during_train = self.cfg['Global'].get(
             'cal_metric_during_train', False)
@@ -569,6 +579,7 @@ class Trainer(object):
                 batch_numpy = [t.numpy() for t in batch]
                 train_reader_cost += time.time() - reader_start
                 # use amp
+                grad_norm = None
                 if self.scaler:
                     amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
                     with torch.amp.autocast(device_type=self.device.type,
@@ -589,11 +600,13 @@ class Trainer(object):
                         loss['loss'] = loss['loss'] / self.accumulation_steps
                     self.scaler.scale(loss['loss']).backward()
                     if (global_step + 1) % self.accumulation_steps == 0:
+                        self.scaler.unscale_(self.optimizer)
                         if self.grad_clip_val > 0:
-                            self.scaler.unscale_(self.optimizer)
-                            torch.nn.utils.clip_grad_norm_(
+                            grad_norm = torch.nn.utils.clip_grad_norm_(
                                 self.model.parameters(),
                                 max_norm=self.grad_clip_val)
+                        else:
+                            grad_norm = self._compute_grad_norm()
                         self.scaler.step(self.optimizer)
                         self.scaler.update()
                         self.optimizer.zero_grad(set_to_none=True)
@@ -603,9 +616,11 @@ class Trainer(object):
                     avg_loss = loss['loss']
                     avg_loss.backward()
                     if self.grad_clip_val > 0:
-                        torch.nn.utils.clip_grad_norm_(
+                        grad_norm = torch.nn.utils.clip_grad_norm_(
                             self.model.parameters(),
                             max_norm=self.grad_clip_val)
+                    else:
+                        grad_norm = self._compute_grad_norm()
                     self.optimizer.step()
                     self.optimizer.zero_grad(set_to_none=True)
 
@@ -649,14 +664,29 @@ class Trainer(object):
                     stats['lr'] = self.lr_scheduler.get_last_lr()[0]
                 except Exception:
                     stats['lr'] = 0.0
+
+                raw_train_stats = {}
+                for key in ('loss_visual', 'loss_linguistic'):
+                    if key in stats:
+                        raw_train_stats[f'raw_{key}'] = stats[key]
+                if grad_norm is not None:
+                    raw_train_stats['grad_norm'] = float(
+                        grad_norm.detach().cpu()
+                        if torch.is_tensor(grad_norm) else grad_norm)
                 train_stats.update(stats)
 
                 if self.writer is not None:
                     for k, v in train_stats.get().items():
                         self.writer.add_scalar(f'TRAIN/{k}', v, global_step)
+                    for k, v in raw_train_stats.items():
+                        self.writer.add_scalar(f'TRAIN/{k}', v, global_step)
 
                 if self.wandb_run is not None:
                     _payload = {f'train/{k}': v for k, v in train_stats.get().items()}
+                    _payload.update({
+                        f'train/{k}': v
+                        for k, v in raw_train_stats.items()
+                    })
                     _payload['global_step'] = global_step
                     _payload['epoch'] = epoch
                     self.wandb_run.log(_payload)

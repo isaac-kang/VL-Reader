@@ -31,15 +31,14 @@ Global:
   # 1 GPU(A6000 48GB)에 per-card BS=768이 fit하므로 accumulation 불필요.
   # → effective batch = 768 (paper 매치).
   accumulation_steps: 1
+  grad_clip_val: 20
 
 Optimizer:
-  # Paper §4.1 specifies plain Adam (not AdamW). Stick with Adam to stay
-  # faithful even though ViT models conventionally use AdamW. No weight
-  # decay because the paper doesn't mention one and torch.optim.Adam's
-  # `weight_decay` is L2-in-gradient (not decoupled) which is a different
-  # regularizer entirely.
-  name: Adam
+  # Use AdamW with zero weight decay to match PARSeq/OpenOCR training
+  # conventions while keeping the update equivalent to Adam without wd.
+  name: AdamW
   lr: 0.0007  # paper: 7e-4 with 4 GPUs * 192 = 768 effective bs
+  weight_decay: 0.0
 
 LRScheduler:
   name: OneCycleLR
