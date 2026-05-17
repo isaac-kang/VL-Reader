@@ -434,8 +434,9 @@ class MVLDecoder(nn.Module):
         # Permutations (PARSeq style) over the maximum content length in batch.
         tgt_perms = self._gen_tgt_perms(tgt, device)
 
-        # Padding mask for keys: ignore PAD positions in text.
-        kpm = (tgt_in == self.pad_id)
+        # Padding mask for keys: EOS/PAD should not be depended upon by other
+        # tokens in any permutation ordering.
+        kpm = (tgt_in == self.pad_id) | (tgt_in == self.eos_id)
 
         loss = fq_in.new_zeros(())
         loss_numel = 0
