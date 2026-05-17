@@ -192,8 +192,9 @@ class Trainer(object):
                 f'(mode={compile_mode}, dynamic={compile_dynamic})')
 
         if self.cfg['Global']['distributed']:
+            fup = self.cfg['Global'].get('find_unused_parameters', False)
             self.model = torch.nn.parallel.DistributedDataParallel(
-                self.model, [self.local_rank], find_unused_parameters=False)
+                self.model, [self.local_rank], find_unused_parameters=fup)
 
         # amp
         self.scaler = (torch.cuda.amp.GradScaler() if self.cfg['Global'].get(

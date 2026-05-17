@@ -58,6 +58,8 @@ table.summary tr.agg { background: #fffbe6; font-weight: bold; }
 table.samples img { display: block; image-rendering: pixelated; height: 48px; }
 table.samples td.text { font-family: monospace; font-size: 13px;
                         white-space: pre; }
+table.samples td.text span.bad { color: #d00; font-weight: bold; }
+table.samples td.text span.good { color: #0a0; font-weight: bold; }
 """
 
 
@@ -72,6 +74,26 @@ def _img_tag(img_np, alt=''):
             f'alt="{html.escape(alt)}"/>')
 
 
+def _diff_recon_html(recon, gt, masked=''):
+    """Color recon chars relative to gt + the input mask view:
+      - mismatch (any position) -> red (`bad`)
+      - match AND position was masked (masked[i] == '_') -> green (`good`)
+      - match AND not masked -> plain
+    `masked` is the masked-input render; '_' marks masked positions."""
+    out = []
+    for i, ch in enumerate(recon):
+        gt_ch = gt[i] if i < len(gt) else ''
+        was_masked = i < len(masked) and masked[i] == '_'
+        esc = html.escape(ch)
+        if ch != gt_ch:
+            out.append(f'<span class="bad">{esc}</span>')
+        elif was_masked:
+            out.append(f'<span class="good">{esc}</span>')
+        else:
+            out.append(esc)
+    return ''.join(out)
+
+
 def parse_args():
     parser = ArgsParser()
     parser.add_argument(
@@ -82,6 +104,22 @@ def parse_args():
         help='Comma-separated dataset basenames to include '
              '(e.g., "CUTE80,IIIT5k"). Default: all in cfg.')
     return parser.parse_args()
+
+
+def _close_lmdb_envs(dataloader):
+    if dataloader is None:
+        return
+    ds = getattr(dataloader, 'dataset', None)
+    sets = getattr(ds, 'lmdb_sets', None) if ds is not None else None
+    if not sets:
+        return
+    for v in sets.values():
+        env = v.get('env') if isinstance(v, dict) else None
+        if env is not None:
+            try:
+                env.close()
+            except Exception:
+                pass
 
 
 def main():
@@ -110,6 +148,11 @@ def main():
     per_dataset = []
     for ds_path in all_dirs:
         ds_name = ds_path.rstrip('/').split('/')[-1]
+        # lmdb-py refuses to open the same path twice in one process. The
+        # initial Trainer() built a dataloader covering all 6 dirs, and each
+        # iter also leaves its single-dir dl behind — close their envs before
+        # rebuilding so the next open() doesn't collide.
+        _close_lmdb_envs(trainer.valid_dataloader)
         eval_ds['data_dir_list'] = [ds_path]
         trainer.valid_dataloader = build_dataloader(
             trainer.cfg, 'Eval', trainer.logger, task='rec')
@@ -188,7 +231,7 @@ def _write_html(path, ckpt_path, per_dataset):
                 f'<td>{_img_tag(s["image_recon"])}</td>'
                 f'<td class="text">{html.escape(s.get("gt_text", ""))}</td>'
                 f'<td class="text">{html.escape(s.get("masked_text", ""))}</td>'
-                f'<td class="text">{html.escape(s.get("recon_text", ""))}</td>'
+                f'<td class="text">{_diff_recon_html(s.get("recon_text", ""), s.get("gt_text", ""), s.get("masked_text", ""))}</td>'
                 '</tr>')
         sample_sections.append(
             f'<h3>{html.escape(name)}</h3>'

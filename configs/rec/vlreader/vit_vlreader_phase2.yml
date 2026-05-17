@@ -20,11 +20,15 @@ Global:
   pretrained_model: ./weights/pretrain/vlreader/best.pth
   checkpoints:
   use_wandb: true
-  total_bs: 768
   # trainer treats total_bs as the PER-STEP batch (per-card BS = total_bs/world_size).
-  # accumulation_steps multiplies on top → keep at 1 so effective batch = 768
-  # matches paper (4 GPUs × 192 per-card). Setting >1 would inflate beyond paper.
-  accumulation_steps: 1
+  # Phase 2 PLM uses perm_num=6 forward passes → activation memory ~6× phase 1;
+  # at 2× A100 80GB with per-card 384 OOMs. Halve per-step batch and recover
+  # paper's effective 768 via accumulation_steps=2.
+  total_bs: 384
+  accumulation_steps: 2
+  # Phase 2 disables visual branch (mask_ratio=0, lambda_v=0) → those params
+  # don't receive grads; DDP needs find_unused_parameters=True.
+  find_unused_parameters: True
 
 Optimizer:
   lr: 0.0001  # paper: 1e-4 in phase 2
